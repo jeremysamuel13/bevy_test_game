@@ -1,6 +1,6 @@
 use bevy::{input::Input, math::Vec3, prelude::*, render::camera::Camera};
 
-use crate::MovementSpeed;
+use crate::{MovementSpeed, MovementMode};
 
 // A simple camera system for moving and zooming the camera.
 #[allow(dead_code)]
@@ -12,6 +12,12 @@ pub fn movement(
 ) {
     for mut transform in query.iter_mut() {
         let mut direction = Vec3::ZERO;
+
+        let movement_mode = if keyboard_input.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) {
+            MovementMode::Sprinting
+        } else {
+            MovementMode::Normal
+        };
 
         if keyboard_input.any_pressed([KeyCode::A, KeyCode::Left]) {
             direction -= Vec3::new(1.0, 0.0, 0.0);
@@ -32,7 +38,7 @@ pub fn movement(
         direction = direction.normalize_or_zero();
 
         let z = transform.translation.z;
-        transform.translation += time.delta_seconds() * direction * movement_speed.0;
+        transform.translation += time.delta_seconds() * direction * movement_speed.0 * movement_mode.movement_multiplier();
         // Important! We need to restore the Z values when moving the camera around.
         // Bevy has a specific camera setup and this can mess with how our layers are shown.
         transform.translation.z = z;

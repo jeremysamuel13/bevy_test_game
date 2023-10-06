@@ -4,27 +4,25 @@ use bevy::utils::Duration;
 
 use bevy::{asset::ChangeWatcher, prelude::*};
 use bevy_ecs_tilemap::prelude::*;
+use bevy_inspector_egui::prelude::*;
+use bevy_inspector_egui::quick::WorldInspectorPlugin;
+
+
 use helpers::pokemon_loader::*;
+
+use rand::distributions::Uniform;
+use rand::prelude::Distribution;
+use rand::thread_rng;
 
 mod helpers;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Reflect, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
     South,
     West,
     East,
     North,
 }
-
-#[derive(Resource, Clone, Copy, PartialEq)]
-pub struct MovementSpeed(f32);
-
-impl Default for MovementSpeed {
-    fn default() -> Self {
-        Self(128.)
-    }
-}
-
 
 impl Direction {
     pub const fn first_index(&self) -> usize {
@@ -41,7 +39,18 @@ impl Direction {
     }
 }
 
-#[derive(Component)]
+#[derive(Reflect, Resource, Clone, Copy, PartialEq)]
+pub struct MovementSpeed(f32);
+
+impl Default for MovementSpeed {
+    fn default() -> Self {
+        Self(128.)
+    }
+
+    
+}
+
+#[derive(Reflect, Component)]
 struct AnimationIndices {
     first: usize,
     last: usize,
@@ -70,8 +79,40 @@ impl AnimationIndices {
     }
 }
 
-#[derive(Component, Deref, DerefMut)]
-struct AnimationTimer(Timer);
+#[derive(Reflect, Clone, Copy, PartialEq, Eq)]
+enum MovementMode {
+    Sprinting,
+    Normal
+}
+
+impl MovementMode {
+    pub const fn timer_duration_f32(&self) -> f32 {
+        match self {
+            MovementMode::Sprinting => 0.1,
+            MovementMode::Normal => 0.2,
+        }
+    }
+
+    pub fn timer_duration(&self) -> Duration {
+        Duration::from_secs_f32(self.timer_duration_f32())
+    }
+
+    pub const fn movement_multiplier(&self) -> f32 {
+        match self {
+            MovementMode::Sprinting => 1.5,
+            MovementMode::Normal => 1.,
+        }
+    }
+}
+
+#[derive(Reflect, Component, Deref, DerefMut)]
+struct SpriteAnimationTimer(Timer);
+
+impl SpriteAnimationTimer {
+    fn set_movement_mode(&mut self, mode: MovementMode) {
+        self.set_duration(mode.timer_duration())
+    }
+}
 
 fn startup(
     mut commands: Commands,
@@ -83,14 +124,16 @@ fn startup(
     let map_handle: Handle<helpers::tiled::TiledMap> =
         asset_server.load(Path::new("tilemaps").join("tuxemon-town.tmx"));
 
-    let tile_size = TilemapTileSize { x: 64.0, y: 64.0 };
     commands.spawn(helpers::tiled::TiledMapBundle {
         tiled_map: map_handle,
         transform: Transform::from_scale(Vec3::new(2., 2., 1.)),
         ..Default::default()
     });
 
-    let asset_path = Asset::OverworldSprite(3, 0, Shinyness::Shiny).get_path();
+    let mut trng = thread_rng();
+    let dist = Uniform::new(0, 899);
+
+    let asset_path = Asset::OverworldSprite(dist.sample(&mut trng), 0, Shinyness::Shiny).get_path();
     let texture_handle = asset_server.load(asset_path);
     let texture_atlas =
         TextureAtlas::from_grid(texture_handle, Vec2::new(64., 64.), 4, 4, None, None);
@@ -107,7 +150,7 @@ fn startup(
             ..Default::default()
         },
         animation_indices,
-        AnimationTimer(Timer::from_seconds(0.1, TimerMode::Repeating)),
+        SpriteAnimationTimer(Timer::from_seconds(MovementMode::Normal.timer_duration_f32(), bevy::time::TimerMode::Repeating)),
     ));
 }
 
@@ -115,7 +158,7 @@ fn animate_sprite(
     time: Res<Time>,
     mut query: Query<(
         &AnimationIndices,
-        &mut AnimationTimer,
+        &mut SpriteAnimationTimer,
         &mut TextureAtlasSprite,
     )>,
 ) {
@@ -139,11 +182,20 @@ fn move_sprite(
         &mut TextureAtlasSprite,
         &mut Transform,
         &mut AnimationIndices,
+        &mut SpriteAnimationTimer,
     )>,
 ) {
-    for (mut sprite, mut transform, mut animation_indices) in query.iter_mut() {
+    for (mut sprite, mut transform, mut animation_indices, mut timer) in query.iter_mut() {
         let mut direction = Vec3::ZERO;
         let mut facing = animation_indices.direction;
+
+        let movement_mode = if keyboard_input.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) {
+            MovementMode::Sprinting
+        } else {
+            MovementMode::Normal
+        };
+
+        timer.set_movement_mode(movement_mode);
 
         if keyboard_input.any_pressed([KeyCode::A, KeyCode::Left]) {
             direction -= Vec3::new(1.0, 0.0, 0.0);
@@ -171,7 +223,7 @@ fn move_sprite(
         direction = direction.normalize_or_zero();
 
         let z = transform.translation.z;
-        transform.translation += time.delta_seconds() * direction * movement_speed.0;
+        transform.translation += time.delta_seconds() * direction * movement_speed.0 * movement_mode.movement_multiplier();
         // Important! We need to restore the Z values when moving the camera around.
         // Bevy has a specific camera setup and this can mess with how our layers are shown.
         transform.translation.z = z;
@@ -196,6 +248,7 @@ fn main() {
                     ..default()
                 }),
         )
+        .add_plugins(WorldInspectorPlugin::new())
         .add_plugins(TilemapPlugin)
         .add_plugins(helpers::tiled::TiledMapPlugin)
         .add_systems(Startup, startup)
