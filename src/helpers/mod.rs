@@ -1,3 +1,4 @@
 pub mod camera;
-pub mod tiled;
+pub mod map;
+pub mod player;
 pub mod pokemon_loader;

@@ -1,8 +1,13 @@
 use std::path::{Path, PathBuf};
 
-type PokedexNumber = u16;
-type Form = u8;
-type ItemNumber = u16;
+use bevy::{
+    asset::{AssetServer, Handle},
+    prelude::{Image, Res},
+};
+
+pub type PokedexNumber = u16;
+pub type Form = u8;
+pub type ItemNumber = u16;
 
 pub enum Shinyness {
     Shiny,
@@ -37,7 +42,6 @@ pub enum Asset {
     BattleSprite(PokedexNumber, Form, Shinyness, BattleSide),
     BattleCry(PokedexNumber),
 }
-
 
 impl Asset {
     pub fn get_prefix(&self) -> PathBuf {
@@ -82,5 +86,9 @@ impl Asset {
         };
 
         prefix.join(filename)
+    }
+
+    pub fn load(&self, asset_server: &Res<AssetServer>) -> Handle<Image> {
+        asset_server.load(self.get_path())
     }
 }
